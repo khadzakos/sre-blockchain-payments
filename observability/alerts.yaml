@@ -1,0 +1,21 @@
+groups:
+  - name: payments
+    rules:
+      - alert: PaymentsProcessDown
+        expr: up{job=~"payments-.*"} == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: 'Process {{ $labels.job }} is unavailable'
+      - alert: PaymentsWorkerStalled
+        expr: time() - payments_worker_last_success_timestamp_seconds{job="payments-worker"} > 60
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: Worker has not completed a successful pass for over a minute
+      - alert: PaymentsHTTPServerErrors
+        expr: sum(rate(payments_http_requests_total{job="payments-api",status=~"5.."}[5m])) > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: API is returning server errors

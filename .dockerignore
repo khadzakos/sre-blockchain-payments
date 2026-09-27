@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+bin
+dist
+coverage
+node_modules
+*.code-workspace
+.DS_Store

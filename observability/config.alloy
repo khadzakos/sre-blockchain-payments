@@ -1,0 +1,65 @@
+logging {
+  level = "info"
+  format = "json"
+}
+
+discovery.docker "payments" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+  filter {
+    name = "label"
+    values = ["com.docker.compose.project=sre-payments"]
+  }
+}
+
+discovery.relabel "payments" {
+  targets = discovery.docker.payments.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex = "/(.*)"
+    target_label = "container"
+  }
+}
+
+loki.source.docker "payments" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.relabel.payments.output
+  labels = {project = "sre-payments"}
+  forward_to = [loki.write.local.receiver]
+  refresh_interval = "5s"
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+otelcol.receiver.otlp "payments" {
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.payments.input]
+  }
+}
+
+otelcol.processor.batch "payments" {
+  timeout = "1s"
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

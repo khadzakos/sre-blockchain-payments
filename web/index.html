@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Nikolay Khadzakos's SRE Project</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">Николай Хадзакос - SRE Project v.0.1</a>
+    </header>
+    <main>
+      <div class="heading">
+        <div>
+          <p class="eyebrow">ПЛАТЕЖИ / СЧЕТА</p>
+        </div>
+        <button id="new">＋ Новый счёт</button>
+      </div>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <section id="workspace">
+        <div class="toolbar">
+          <label
+            >Состояние<select id="filter">
+              <option value="">Все счета</option>
+              <option value="draft">Черновики</option>
+              <option value="open">Ожидают оплаты</option>
+              <option value="expired">Срок истёк</option>
+              <option value="cancelled">Отменены</option>
+              <option value="paid">Оплачены</option>
+            </select></label
+          >
+          <div>
+            <button id="refresh" class="secondary">Обновить</button>
+          </div>
+        </div>
+        <div class="panel table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Счёт / назначение</th>
+                <th>Сумма в единицах токена</th>
+                <th>Статус</th>
+                <th>Срок оплаты</th>
+              </tr>
+            </thead>
+            <tbody id="invoices"></tbody>
+          </table>
+          <p id="empty" class="empty" hidden>Счетов пока нет. Создайте первый черновик.</p>
+        </div>
+        <div class="pagination">
+          <button id="prev" class="secondary">← Назад</button><span id="page"></span
+          ><button id="next" class="secondary">Далее →</button>
+        </div>
+        <p class="footnote">
+          Сейчас доступно управление счетами. Подключение кошелька и проверка блокчейн-платежей
+          появятся следующим этапом.
+        </p>
+      </section>
+      <dialog id="editor">
+        <form id="invoice-form">
+          <div class="dialog-heading">
+            <h2 id="editor-title">Новый счёт</h2>
+            <button type="button" data-close="editor" class="secondary">Закрыть</button>
+          </div>
+          <div class="panel">
+            <p>Заполните форму примером, затем сохраните черновик.</p>
+            <div class="actions">
+              <button type="button" id="example-standard" class="secondary">Обычный счёт</button>
+              <button type="button" id="example-expiring" class="secondary">
+                Истечение через 2 минуты
+              </button>
+            </div>
+            <p class="muted">
+              Адреса вымышленные, переводов в блокчейне нет. Черновик можно изменить или удалить.
+              После выставления — отменить или дождаться истечения срока при работающем worker.
+            </p>
+          </div>
+          <label
+            >За что платёж<textarea
+              name="description"
+              maxlength="500"
+              required
+              rows="2"
+              placeholder="Например, разработка сайта"
+            ></textarea>
+          </label>
+          <div class="grid">
+            <label
+              >Сумма в минимальных единицах<input
+                name="amount"
+                pattern="[1-9][0-9]{0,77}"
+                required
+                placeholder="10000000"
+              /><small>Для токена с 6 знаками: 10 токенов = 10000000.</small></label
+            ><label
+              >Chain ID<input
+                name="chain_id"
+                type="number"
+                min="1"
+                max="9007199254740991"
+                required
+                placeholder="84532"
+            /></label>
+          </div>
+          <label
+            >Адрес контракта токена<input
+              name="token_address"
+              pattern="0x[0-9a-fA-F]{40}"
+              required
+              placeholder="0x…"
+              spellcheck="false"
+          /></label>
+          <label
+            >Кошелёк получателя<input
+              name="recipient_address"
+              pattern="0x[0-9a-fA-F]{40}"
+              required
+              placeholder="0x…"
+              spellcheck="false"
+          /></label>
+          <label
+            >Срок оплаты — ваше местное время<input
+              name="expires_at"
+              type="datetime-local"
+              step="1"
+              required
+          /></label>
+          <p id="form-error" class="error" role="alert"></p>
+          <button id="save">Сохранить черновик</button>
+        </form>
+      </dialog>
+      <dialog id="details">
+        <div class="dialog-heading">
+          <h2>Карточка счёта</h2>
+          <button data-close="details" class="secondary">Закрыть</button>
+        </div>
+        <div id="detail-content"></div>
+        <div id="actions" class="actions"></div>
+        <p id="detail-error" class="error" role="alert"></p>
+        <h3>История</h3>
+        <ol id="history"></ol>
+      </dialog>
+    </main>
+    <footer>SRE PAYMENTS <span>Go · PostgreSQL · SRE</span></footer>
+  </body>
+</html>

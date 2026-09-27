@@ -1,0 +1,11 @@
+{
+  "name": "sre-blockchain-payments",
+  "private": true,
+  "scripts": {
+    "format": "prettier --write web/*.html web/*.css web/*.js observability/**/*.{json,yaml} *.yaml .golangci.yml",
+    "format:check": "prettier --check web/*.html web/*.css web/*.js observability/**/*.{json,yaml} *.yaml .golangci.yml"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
+}

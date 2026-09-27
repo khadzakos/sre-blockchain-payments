@@ -1,0 +1,27 @@
+name: Quality
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+      - name: Go formatting
+        run: test -z "$(golangci-lint fmt --diff)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run format:check
+      - name: Compose validation
+        run: cp .env.example .env && docker compose config --quiet
+      - name: Build runtime image
+        run: docker build -t sre-payments:ci .
