@@ -12,8 +12,6 @@ import (
 	"github.com/khadzakos/sre-blockchain-payments/internal/telemetry"
 )
 
-// Repository writes each invoice change and its event atomically.
-// Save and Delete reject stale versions; they never silently overwrite changes.
 type Repository interface {
 	Create(context.Context, domain.Invoice, domain.Event) error
 	Get(context.Context, string) (domain.Invoice, error)
