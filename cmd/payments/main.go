@@ -55,7 +55,7 @@ func run() error {
 	defer func() { _ = log.Sync() }()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	shutdownTracing, err := telemetry.InitTracing(ctx, "payments-"+command, version)
+	shutdownTracing, err := telemetry.InitTracing(ctx, "payments-"+command, version, c.TraceEndpoint)
 	if err != nil {
 		return err
 	}

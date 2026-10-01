@@ -10,7 +10,7 @@
 - История изменений, атомарные записи и оптимистическая блокировка по версии.
 - Точные суммы в минимальных единицах токена, без `float`.
 - Учебный интерфейс без авторизации, с примерами для заполнения счетов.
-- Prometheus, Grafana, Loki, Tempo, Alloy; JSON-логи zap и OpenTelemetry.
+- JSON-логи zap с корреляцией запросов; опционально Prometheus, Grafana, Loki, Tempo и Alloy.
 
 Подписание переводов, проверка блокчейна, попытки оплаты, статус `paid`
 и escrow пока не реализованы. Они описаны в целевой модели и будут добавлены
@@ -24,7 +24,7 @@
 
 ```sh
 cp .env.example .env
-# Задайте собственный GRAFANA_ADMIN_PASSWORD в .env.
+# Для локального учебного запуска достаточно значений из примера.
 docker compose up --build -d
 ```
 
@@ -32,6 +32,20 @@ docker compose up --build -d
 вместо `docker compose` во всех командах.
 
 - Приложение: http://localhost:8080 — открывается без входа.
+При обычном запуске работают только PostgreSQL, миграции, API и worker.
+Экспорт трасс отключён; JSON-логи доступны через `docker compose logs`.
+
+### Запуск с мониторингом
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitoring up --build -d
+# Или: make up-monitoring
+```
+
+Профиль включает пять дополнительных служб. Переменная включает экспорт
+трасс в Alloy; один только профиль включает сбор логов и метрик, без экспорта трасс.
+Адрес можно сохранить в `.env`, чтобы не указывать его в командной строке.
+
 - Grafana: http://localhost:3000 — пользователь `admin`, пароль из `GRAFANA_ADMIN_PASSWORD`.
 - Prometheus: http://localhost:9090.
 - Дашборд Grafana: **SRE Payments → Payments · Processes, requests & logs**.
@@ -45,14 +59,23 @@ docker compose up --build -d
 ```sh
 docker compose ps
 docker compose logs -f api worker
-docker compose stop
+docker compose --profile monitoring stop
 # Остановить и удалить контейнеры, сохранив данные:
-docker compose down
+docker compose --profile monitoring down
 ```
 
 API, worker и миграции используют один образ. `migrate` — отдельная команда,
 Compose ждёт её успешного завершения перед запуском приложения.
 Для повторного применения миграций: `docker compose run --rm migrate`.
+
+Чтобы вернуться к базовому запуску и остановить мониторинг без удаления данных:
+
+```sh
+docker compose --profile monitoring stop prometheus grafana loki tempo alloy
+OTEL_EXPORTER_OTLP_ENDPOINT= docker compose up -d
+```
+
+Если адрес экспорта сохранён в `.env`, очистите его для последующих базовых запусков.
 
 ## Как устроен код
 
@@ -98,7 +121,7 @@ Compose и сборка приложения. Команды приведены 
 5. Добавить escrow после отработки надёжности базовых платежей.
 
 Подробности: [модель](docs/domain.md), [API](docs/api.md),
-[мониторинг и отладка](docs/observability.md), [отчёт](Отчёт.md).
+[мониторинг и отладка](docs/observability.md), [отчёт](reports/Отчёт_HW1.md).
 
 ## Обязательные проверки качества
 

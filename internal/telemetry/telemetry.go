@@ -61,25 +61,33 @@ func NewLogger(level, process, version string) (*zap.Logger, error) {
 	return log, err
 }
 
-func InitTracing(ctx context.Context, service, version string) (func(context.Context) error, error) {
-	exporter, err := otlptracehttp.New(ctx)
-	if err != nil {
-		return nil, err
-	}
+// An empty endpoint keeps trace correlation locally without creating an exporter.
+func InitTracing(
+	ctx context.Context,
+	service, version, endpoint string,
+) (func(context.Context) error, error) {
 	res := resource.NewWithAttributes(
 		"",
 		attribute.String("service.name", service),
 		attribute.String("service.version", version),
 	)
-	provider := sdktrace.NewTracerProvider(
+	options := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithBatcher(
+	}
+	if endpoint != "" {
+		exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(endpoint))
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, sdktrace.WithBatcher(
 			exporter,
 			sdktrace.WithBatchTimeout(time.Second),
 			sdktrace.WithExportTimeout(3*time.Second),
-		),
-	)
+		))
+	}
+	provider := sdktrace.NewTracerProvider(options...)
+
 	otel.SetTracerProvider(provider)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	otel.SetErrorHandler(

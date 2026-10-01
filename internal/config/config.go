@@ -8,13 +8,14 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, Port, LogLevel string
-	WorkerInterval              time.Duration
+	DatabaseURL, Port, LogLevel, TraceEndpoint string
+	WorkerInterval                             time.Duration
 }
 
 func Load() (Config, error) {
 	c := Config{
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		TraceEndpoint:  os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 		Port:           os.Getenv("PORT"),
 		LogLevel:       os.Getenv("LOG_LEVEL"),
 		WorkerInterval: 5 * time.Second,

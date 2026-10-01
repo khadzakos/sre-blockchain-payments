@@ -22,6 +22,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run format:check
       - name: Compose validation
-        run: cp .env.example .env && docker compose config --quiet
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitoring config --quiet
       - name: Build runtime image
         run: docker build -t sre-payments:ci .

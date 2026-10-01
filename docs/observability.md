@@ -1,6 +1,31 @@
 # Мониторинг, логи и трейсы
 
-## Потоки данных
+## Включение
+
+Мониторинг опционален. Базовый `docker compose up --build -d` запускает
+приложение с PostgreSQL без Prometheus, Grafana, Loki, Tempo и Alloy.
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitoring up --build -d
+```
+
+Либо выполните `make up-monitoring`. Профиль включает службы, а переменная
+окружения отдельно включает экспорт трасс. При пустом endpoint экспортёр
+и очередь не создаются, сетевых попыток экспорта нет. `trace_id`, `span_id`,
+`request_id` в логах и `/metrics` доступны в обоих режимах; без экспорта
+трейсы не сохраняются в Tempo. Само приложение не зависит от готовности Alloy.
+
+Для возврата к базовому режиму:
+
+```sh
+docker compose --profile monitoring stop prometheus grafana loki tempo alloy
+OTEL_EXPORTER_OTLP_ENDPOINT= docker compose up -d
+```
+
+Профили не останавливают ранее запущенные контейнеры автоматически.
+Если endpoint сохранён в `.env`, очистите его. Данные мониторинга остаются в volumes.
+
+## Потоки данных (при включённом мониторинге)
 
 - API и worker → `/metrics` → Prometheus → Grafana.
 - zap → stdout → Docker logs → Alloy → Loki → Grafana.
@@ -73,7 +98,7 @@ Prometheus содержит правила ProcessDown, WorkerStalled и HTTPSer
 - https://grafana.com/docs/tempo/latest/
 - https://pkg.go.dev/go.uber.org/zap
 
-## Проверка текущей реализации
+## История проверки полного окружения
 
 Локально проверены: шесть scrape targets Prometheus со статусом `up`,
 создание всех трёх Grafana datasources и загрузка дашборда, поиск одного запроса
