@@ -1,4 +1,3 @@
-// Package domain contains billing rules without infrastructure dependencies.
 package domain
 
 import (

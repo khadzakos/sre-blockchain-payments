@@ -306,7 +306,6 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, events)
 }
 
-// Fixed route labels prevent invoice IDs and arbitrary URLs creating metric series.
 func routeName(path string) string {
 	switch path {
 	case "/", "/app.js", "/style.css", "/healthz", "/readyz", "/metrics", "/api/invoices":

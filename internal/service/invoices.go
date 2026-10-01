@@ -1,4 +1,3 @@
-// Package service defines use cases and the ports they require.
 package service
 
 import (

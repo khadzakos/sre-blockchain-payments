@@ -1,4 +1,3 @@
-// Package repository adapts the billing repository port to PostgreSQL.
 package repository
 
 import (
@@ -230,7 +229,6 @@ func (p *Postgres) Events(ctx context.Context, id string) ([]domain.Event, error
 	return out, rows.Err()
 }
 
-// Migrate is a one-off admin process. Transaction-scoped locking serializes runners.
 func (p *Postgres) Migrate(ctx context.Context) error {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {

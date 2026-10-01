@@ -1,4 +1,3 @@
-// Package telemetry connects zap logs, OpenTelemetry traces and Prometheus metrics.
 package telemetry
 
 import (
@@ -61,7 +60,6 @@ func NewLogger(level, process, version string) (*zap.Logger, error) {
 	return log, err
 }
 
-// An empty endpoint keeps trace correlation locally without creating an exporter.
 func InitTracing(
 	ctx context.Context,
 	service, version, endpoint string,
