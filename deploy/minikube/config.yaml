@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payments-config
+  namespace: sre-payments
+data:
+  PORT: '8080'
+  LOG_LEVEL: INFO
+  WORKER_INTERVAL: 5s
+  OTEL_EXPORTER_OTLP_ENDPOINT: ''
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payments-db
+  namespace: sre-payments
+type: Opaque
+stringData:
+  POSTGRES_USER: payments
+  POSTGRES_DB: payments
+  POSTGRES_PASSWORD: minikube-demo-password
+  DATABASE_URL: postgres://payments:minikube-demo-password@postgres:5432/payments?sslmode=disable
