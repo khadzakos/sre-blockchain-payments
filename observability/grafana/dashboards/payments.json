@@ -1,6 +1,6 @@
 {
   "uid": "payments-overview",
-  "title": "Payments \u00b7 Processes, requests & logs",
+  "title": "Payments · Processes, requests & logs",
   "schemaVersion": 41,
   "version": 1,
   "refresh": "10s",
@@ -318,11 +318,11 @@
     },
     {
       "id": 10,
-      "title": "Application logs \u2014 expand a row to open TraceID",
+      "title": "Application logs — expand a row to open trace",
       "type": "logs",
       "datasource": {
-        "type": "loki",
-        "uid": "loki"
+        "type": "victoriametrics-logs-datasource",
+        "uid": "victorialogs"
       },
       "gridPos": {
         "x": 0,
@@ -333,7 +333,9 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{project=\"sre-payments\",service=~\"api|worker|migrate\"} | json"
+          "expr": "project:=\"sre-payments\"",
+          "queryType": "instant",
+          "editorMode": "code"
         }
       ],
       "options": {

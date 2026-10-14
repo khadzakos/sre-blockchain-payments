@@ -23,3 +23,6 @@ coverage.out
 .idea/
 .vscode/
 *.code-workspace
+
+# Reports
+private/

@@ -1,0 +1,136 @@
+apiVersion: 'v1'
+kind: 'ServiceAccount'
+metadata:
+  name: 'alloy'
+  namespace: 'observability'
+---
+apiVersion: 'rbac.authorization.k8s.io/v1'
+kind: 'Role'
+metadata:
+  name: 'payments-log-reader'
+  namespace: 'sre-payments'
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - 'pods'
+    verbs:
+      - 'get'
+      - 'list'
+      - 'watch'
+  - apiGroups:
+      - ''
+    resources:
+      - 'pods/log'
+    verbs:
+      - 'get'
+---
+apiVersion: 'rbac.authorization.k8s.io/v1'
+kind: 'RoleBinding'
+metadata:
+  name: 'payments-log-reader'
+  namespace: 'sre-payments'
+roleRef:
+  apiGroup: 'rbac.authorization.k8s.io'
+  kind: 'Role'
+  name: 'payments-log-reader'
+subjects:
+  - kind: 'ServiceAccount'
+    name: 'alloy'
+    namespace: 'observability'
+---
+apiVersion: 'apps/v1'
+kind: 'Deployment'
+metadata:
+  name: 'alloy'
+  namespace: 'observability'
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: 'alloy'
+  template:
+    metadata:
+      labels:
+        app: 'alloy'
+    spec:
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: 'RuntimeDefault'
+      containers:
+        - name: 'alloy'
+          image: 'grafana/alloy:v1.10.2'
+          imagePullPolicy: IfNotPresent
+          args:
+            - 'run'
+            - '--server.http.listen-addr=0.0.0.0:12345'
+            - '--storage.path=/var/lib/alloy/data'
+            - '/etc/alloy/config.alloy'
+          ports:
+            - name: 'http'
+              containerPort: 12345
+            - name: 'otlp-http'
+              containerPort: 4318
+          resources:
+            requests:
+              cpu: '50m'
+              memory: '64Mi'
+            limits:
+              cpu: '500m'
+              memory: '256Mi'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - 'ALL'
+          startupProbe:
+            httpGet:
+              path: '/-/ready'
+              port: 'http'
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: '/-/ready'
+              port: 'http'
+          livenessProbe:
+            httpGet:
+              path: '/-/healthy'
+              port: 'http'
+          volumeMounts:
+            - name: 'config'
+              mountPath: '/etc/alloy'
+              readOnly: true
+            - name: 'data'
+              mountPath: '/var/lib/alloy'
+      volumes:
+        - name: 'config'
+          configMap:
+            name: 'alloy-config'
+        - name: 'data'
+          emptyDir: {}
+      serviceAccountName: 'alloy'
+---
+apiVersion: 'v1'
+kind: 'Service'
+metadata:
+  name: 'alloy'
+  namespace: 'observability'
+spec:
+  selector:
+    app: 'alloy'
+  ports:
+    - name: 'http'
+      port: 12345
+      targetPort: 'http'
+    - name: 'otlp-http'
+      port: 4318
+      targetPort: 'otlp-http'

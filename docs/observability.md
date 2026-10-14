@@ -1,112 +1,200 @@
-# Мониторинг, логи и трейсы
+# Метрики, логи и трейсы
 
-## Включение
+## Состав окружений
 
-Мониторинг опционален. Базовый `docker compose up --build -d` запускает
-приложение с PostgreSQL без Prometheus, Grafana, Loki, Tempo и Alloy.
+Базовый Compose запускает PostgreSQL, миграции, API и worker. Профиль `monitoring`
+добавляет Prometheus, VictoriaLogs, Tempo, Alloy и Grafana:
 
 ```sh
 OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitoring up --build -d
 ```
 
-Либо выполните `make up-monitoring`. Профиль включает службы, а переменная
-окружения отдельно включает экспорт трасс. При пустом endpoint экспортёр
-и очередь не создаются, сетевых попыток экспорта нет. `trace_id`, `span_id`,
-`request_id` в логах и `/metrics` доступны в обоих режимах; без экспорта
-трейсы не сохраняются в Tempo. Само приложение не зависит от готовности Alloy.
+Если Compose установлен отдельно, используйте `docker-compose`. Для возврата к
+базовому запуску остановите `prometheus grafana victorialogs tempo alloy` и очистите
+`OTEL_EXPORTER_OTLP_ENDPOINT`. Профиль сам по себе включает сбор логов и метрик;
+переменная отдельно включает экспорт трейсов. При пустом endpoint идентификаторы
+в логах генерируются, но полные spans не сохраняются.
 
-Для возврата к базовому режиму:
+В minikube приложение и PostgreSQL находятся в `sre-payments`; VictoriaLogs single-node,
+Tempo, Alloy и Grafana — в `observability` того же кластера. Prometheus остаётся в Compose.
+Для запуска всего стенда с уже работающим Docker выполните `make minikube-up`.
+Команда запускает minikube, собирает образ, разворачивает приложение и инфраструктуру,
+открывает локальный доступ к приложению, vmui и Grafana в фоне. Подключения
+восстанавливаются при замене подов; отдельные терминалы для `port-forward` не нужны.
+Команда не запускает Colima и не управляет Docker. `make minikube-status` показывает
+состояние, `make minikube-ui` открывает подключения к уже работающему кластеру,
+`make minikube-ui-stop` останавливает их. Для запуска фоновых подключений используется Python 3.
+Для применения конфигурации к уже работающему приложению используется
+`kubectl --context=sre-payments apply -k deploy/observability`.
+После изменений кода повторите `make minikube-up`: новый образ получает тег по содержимому,
+и изменение ссылки на образ запускает обновление подов. Подробности находятся в README.
 
-```sh
-docker compose --profile monitoring stop prometheus grafana loki tempo alloy
-OTEL_EXPORTER_OTLP_ENDPOINT= docker compose up -d
+Overlay объединяет приложение из `deploy/minikube/` с ресурсами инфраструктуры.
+Генераторы в `observability/kustomization.yaml` читают общие файлы Alloy, Tempo и Grafana.
+Отдельный генерируемый ConfigMap `payments-telemetry` в namespace `sre-payments`
+задаёт адрес Alloy; он подключается последним в `envFrom` API и worker.
+Генерируемые ConfigMap имеют хэш в имени. При изменении содержимого и повторном apply
+ссылка в шаблоне пода меняется, и Deployment обновляет поды без принудительного restart.
+Это стандартная [схема Kustomize](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/).
+
+## Потоки данных
+
+- JSON zap → stdout → Docker API или Kubernetes Pod logs API → Alloy → VictoriaLogs.
+- OpenTelemetry → OTLP/HTTP Alloy `:4318` → OTLP/gRPC Tempo `:4317`.
+- VictoriaLogs и Tempo → отдельные источники Grafana, связанные идентификатором трейса.
+- `/metrics` API и worker → Prometheus в Compose → Grafana.
+
+Alloy использует Loki-совместимый endpoint VictoriaLogs `/insert/loki/api/v1/push`.
+Компоненты `loki.source.*` и `loki.write` описывают протокол доставки; отдельного
+сервера Loki в актуальном окружении нет. VictoriaLogs разбирает JSON при поступлении,
+поэтому поля доступны для фильтрации без `unpack_json` в каждом запросе.
+
+В Kubernetes Alloy работает как один Deployment. Он обнаруживает только поды API,
+worker и миграций в `sre-payments` и читает их логи через API. Role разрешает
+`get/list/watch pods` и `get pods/log`, без доступа к Secrets. Docker socket и
+каталоги ноды не монтируются. Для большого кластера вместо одного API-сборщика
+можно использовать сбор файлов на нодах, но для этого стенда он не требуется.
+
+## Схема JSON-логов
+
+| Поле                                    | Содержание                                                |
+| --------------------------------------- | --------------------------------------------------------- |
+| `timestamp`                             | ISO8601 со смещением UTC                                  |
+| `level`                                 | Уровень zap в нижнем регистре                             |
+| `message`                               | Сообщение события                                         |
+| `service.name`                          | `payments-api`, `payments-worker`, `payments-migrate`     |
+| `service.version`                       | Версия сборки                                             |
+| `trace_id`                              | Идентификатор всего трейса, если контекст span существует |
+| `span_id`                               | Идентификатор текущей операции внутри трейса              |
+| `request_id`                            | Идентификатор HTTP-запроса, если он есть в контексте      |
+| `method`, `route`, `status`, `duration` | Итог HTTP-запроса; длительность в секундах                |
+| `operation`, `error`                    | Операция и ошибка, если применимы                         |
+
+Alloy дополнительно передаёт `project`, `environment` и поля источника. В minikube
+это `namespace`, `pod`, `container`, `app`; в Compose — `service`, `container`.
+Только эти поля определяют поток. `trace_id`, `span_id`, `request_id` остаются обычными
+поисковыми полями. В VictoriaLogs время доступно как `_time`, сообщение — как `_msg`.
+Стартовые записи процесса могут не содержать идентификаторов запроса и span.
+
+## Поиск одного запроса и его spans
+
+1. Выполните HTTP-запрос. Возьмите `X-Request-ID` и `X-Trace-Id` из заголовков ответа.
+2. Откройте Grafana → Explore → VictoriaLogs, выберите подходящий диапазон времени.
+3. Найдите запрос или весь трейс:
+
+```logsql
+request_id:="ВАШ_REQUEST_ID"
 ```
 
-Профили не останавливают ранее запущенные контейнеры автоматически.
-Если endpoint сохранён в `.env`, очистите его. Данные мониторинга остаются в volumes.
-
-## Потоки данных (при включённом мониторинге)
-
-- API и worker → `/metrics` → Prometheus → Grafana.
-- zap → stdout → Docker logs → Alloy → Loki → Grafana.
-- OpenTelemetry → OTLP/HTTP → Alloy → OTLP/gRPC → Tempo → Grafana.
-
-Prometheus измеряет процессы Go: CPU, RSS, goroutines, GC, файловые дескрипторы.
-Прикладные метрики: количество и длительность HTTP-запросов, результат проходов
-worker, время последнего успешного прохода и количество просроченных счетов.
-Это мониторинг процессов приложения, не всех процессов хоста и не PostgreSQL;
-node_exporter, cAdvisor и postgres_exporter пока не подключены.
-
-В Loki labels — только project/service/container. `trace_id`, `span_id` и
-`request_id` остаются JSON-полями: высокая кардинальность не раздувает индекс.
-HTTP-метрики используют шаблон маршрута, а не идентификатор счёта.
-
-## Отладка одного запроса
-
-1. Выполните действие в приложении.
-2. В DevTools → Network найдите `X-Trace-ID` ответа.
-3. Grafana → Explore → Loki:
-
-```logql
-{project="sre-payments", service="api"} | json | trace_id="ВАШ_TRACE_ID"
+```logsql
+trace_id:="ВАШ_TRACE_ID" | sort by (_time)
 ```
 
-4. Раскройте строку лога и нажмите **Open trace** в поле TraceID.
-5. Tempo покажет HTTP span, сервисные операции и SQL spans.
-6. Из Tempo доступен переход обратно к логам выбранного трейса.
+4. Раскройте запись и нажмите **Open trace** у поля `trace_id`.
+5. Tempo покажет серверный HTTP span, сервисные операции и SQL spans.
+6. Из выбранного span нажмите **Related logs**. Запрос фильтрует одновременно
+   `trace_id` и `span_id`, с запасом времени ±1 минута.
+7. Для всех логов запроса используйте **Request logs** у поля `request_id`.
 
-Для логов worker используйте `service="worker"`. Каждый проход получает
-отдельный корневой span `worker.expire`. Связь с исходным запросом выставления
-счёта через span link пока не реализована: это разные операции во времени.
+Каждый дочерний span имеет собственный `span_id`, общий `trace_id` и, для HTTP,
+общий `request_id`. Поэтому фильтр по одному `span_id` показывает только эту операцию,
+а фильтр по `trace_id` — все её связанные операции. Grafana обновлена до версии,
+поддерживающей VictoriaLogs в обратном переходе из Tempo.
 
-Ошибки сервисов и SQL помечают span как error. HTTP 5xx помечает серверный
-span как error; ожидаемые HTTP 4xx видны по атрибуту status. zap добавляет
-идентификаторы из контекста, а сервисы логируют длительность операций.
-SQL-текст и аргументы не экспортируются. Авторизация и тела запросов не логируются.
+Проходы worker создают отдельные корневые трейсы `worker.expire`, без HTTP request ID.
+Связь с предыдущим запросом создания или выставления счёта не моделируется.
+Поиск истории счёта через `invoice_id` в эту итерацию не включён.
 
-В учебном окружении включён sampling 100%, включая входящий traceparent
-с sampled=0. Сбой экспорта трейсов не прерывает бизнес-операцию; очередь экспорта
-ограничена, при длительной недоступности коллектора часть трейсов может потеряться.
-При завершении процесса экспорт ожидается не более 5 секунд.
+HTTP 5xx и ошибки операций помечают соответствующие spans как ошибочные.
+Ожидаемые 4xx видны по `status`; они не обязательно имеют `level:error`.
+SQL-текст, аргументы SQL и тела запросов не экспортируются.
+Sampling — 100% для учебного стенда, включая входящий `traceparent` с `sampled=0`.
 
-## Источники и хранение
+## Четыре запроса для задания
 
-Grafana автоматически получает три источника данных и дашборд Payments.
-Prometheus хранит метрики 7 дней, Loki — логи 7 дней, Tempo — трейсы 24 часа.
-Все хранилища локальные в Docker volumes, без репликации.
-Пароль Grafana задаётся при первом создании её базы; смена env не меняет
-пароль уже существующего пользователя.
+Откройте VictoriaLogs vmui по `/select/vmui/` (канонический путь в установленной версии).
+Выберите последние 15 минут и выполняйте запросы по очереди:
 
-Alloy читает Docker API через socket и отбирает контейнеры проекта `sre-payments`.
-Socket mount `:ro` не ограничивает операции Docker API; такой доступ доверяем
-только локальному учебному коллектору. Для общего production-хоста нужен
-ограничивающий proxy или другой способ доставки логов.
+1. Сырые записи приложения за последние 15 минут:
 
-## Предупреждения
+```logsql
+_time:15m project:="sre-payments" | sort by (_time) desc | limit 20
+```
 
-Prometheus содержит правила ProcessDown, WorkerStalled и HTTPServerErrors.
-Их состояния видны на `/alerts`; отправка уведомлений не настроена, Alertmanager
-не подключён. Отдельный heartbeat worker позволяет отличить живой HTTP endpoint
-метрик от реально работающей обработки.
+2. Фильтр по полю: HTTP-ответы API с кодом 400 и выше:
 
-Для другого интервала worker согласуйте порог WorkerStalled в alerts.yaml.
+```logsql
+_time:15m project:="sre-payments" service.name:="payments-api" _msg:="http request" status:>=400
+```
 
-## Документация используемых компонентов
+3. Количество записей с группировкой по сервису и уровню:
 
-- https://opentelemetry.io/docs/languages/go/
-- https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.docker/
-- https://grafana.com/docs/tempo/latest/
-- https://pkg.go.dev/go.uber.org/zap
+```logsql
+_time:15m project:="sre-payments" | stats by (service.name, level) count() as logs
+```
 
-## История проверки полного окружения
+4. Пять самых частых HTTP-маршрутов:
 
-Локально проверены: шесть scrape targets Prometheus со статусом `up`,
-создание всех трёх Grafana datasources и загрузка дашборда, поиск одного запроса
-в Loki и получение его из Tempo. Трейс выставления счёта содержит HTTP span,
-`service.Change`, а также `postgres.select/begin/update/insert/commit`.
+```logsql
+_time:15m project:="sre-payments" service.name:="payments-api" route:* | top 5 by (route)
+```
 
-Локальный runtime-образ для этой проверки собран из Linux-бинарника,
-скомпилированного нативным Go на macOS: существующая x86 Colima сильно
-замедляет компиляцию. Полная multi-stage сборка Dockerfile настроена в CI;
-локально эта полная сборка пока не проверена. GitHub Actions ещё не запускался,
-поскольку изменения не закоммичены и не отправлены.
+Дополнительно можно оценить число запросов и p95 длительности HTTP-обработки:
+
+```logsql
+_time:15m service.name:="payments-api" _msg:="http request" | stats count_uniq(request_id) as requests, quantile(0.95, duration) as p95_seconds
+```
+
+Агрегации `stats` и `top` удобно смотреть в табличном режиме vmui.
+В Grafana преднастроен дашборд **Payments · Logs & traces**: логи, ошибки HTTP,
+группировка и популярные маршруты. Официальный плагин VictoriaLogs устанавливается
+до запуска Grafana, источники и связи создаются через provisioning.
+
+## Хранение и поведение при сбоях
+
+VictoriaLogs: семь дней (`-retentionPeriod=7d`); Tempo: 168 часов (`block_retention`).
+В minikube используются отдельные PVC: VictoriaLogs 2Gi, Tempo 2Gi, Grafana 1Gi.
+В Compose — named volumes. Принятые данные переживают замену подов/контейнеров.
+Удаление самого minikube-кластера или томов может удалить данные. Репликации и
+резервного копирования в учебном стенде нет. Запрошенный размер local-path PVC
+не следует считать жёстким ограничением дискового потребления.
+
+Alloy повторяет отправку логов до 10 раз; экспорт spans использует очередь в памяти
+и повторные попытки. Экспортёр приложения также имеет ограниченную очередь.
+Длительная недоступность, переполнение очереди или перезапуск сборщика могут
+привести к потере недоставленных данных. Сбой телеметрии не прерывает обработку
+платёжного запроса. Гарантия доставки без потерь и очередь на диске не заявляются. При перезапуске
+API-сборщик может повторно прочитать доступные логи подов, поэтому `count()` считает
+записи, включая повторы. Для числа HTTP-запросов используйте `count_uniq(request_id)`
+с фильтром `_msg:="http request"`.
+
+Пароль Grafana применяется при первоначальном создании базы. Изменение Secret/env
+не меняет пароль уже существующего пользователя. Compose сохраняет заданный
+`GRAFANA_ADMIN_PASSWORD`, minikube использует отдельный учебный Secret.
+
+## Замена старого окружения
+
+Новая конфигурация Compose удаляет источник Loki из Grafana provisioning. Если
+старый контейнер Loki остался как orphan, остановите именно его через Docker перед
+следующим запуском. Старый том с логами не удаляется и не мигрируется автоматически;
+VictoriaLogs начинает новый сбор. Исторические отчёты о предыдущих заданиях
+сохраняют описание окружения, которое реально проверялось тогда.
+
+## Метрики и предупреждения
+
+Prometheus в Compose собирает метрики API, worker, VictoriaLogs, Tempo, Alloy и себя.
+Прикладные метрики показывают HTTP-запросы и задержки, результаты проходов worker,
+время последнего успешного прохода и число просроченных счетов. HTTP-маршруты
+нормализованы, чтобы идентификаторы счетов не создавали новые временные ряды.
+
+Правила ProcessDown, WorkerStalled и HTTPServerErrors доступны на `/alerts`.
+Отправка уведомлений не настроена; Alertmanager и vmalert не подключены.
+Бонус задания реализован официальным Grafana-плагином VictoriaLogs.
+
+## Документация
+
+- [VictoriaLogs: Alloy и разбор JSON](https://docs.victoriametrics.com/victorialogs/data-ingestion/promtail/)
+- [LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/)
+- [Grafana: VictoriaLogs и связь с Tempo](https://docs.victoriametrics.com/victorialogs/integrations/grafana/)
+- [Alloy: сбор подов через Kubernetes API](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/)
+- [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/)

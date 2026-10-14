@@ -46,13 +46,17 @@ func NewLogger(level, process, version string) (*zap.Logger, error) {
 	c.OutputPaths = []string{"stdout"}
 	c.ErrorOutputPaths = []string{"stderr"}
 	c.EncoderConfig.TimeKey = "timestamp"
+	c.EncoderConfig.MessageKey = "message"
 	c.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	if err := c.Level.UnmarshalText([]byte(level)); err != nil {
 		return nil, err
 	}
 	c.Sampling = nil // Every request remains searchable in the learning environment.
 	log, err := c.Build(
-		zap.Fields(zap.String("service", "payments-"+process), zap.String("version", version)),
+		zap.Fields(
+			zap.String("service.name", "payments-"+process),
+			zap.String("service.version", version),
+		),
 	)
 	if err == nil {
 		zap.ReplaceGlobals(log)

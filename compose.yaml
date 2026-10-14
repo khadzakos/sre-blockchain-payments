@@ -68,13 +68,13 @@ services:
       - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - ./observability/alerts.yaml:/etc/prometheus/alerts.yaml:ro
       - prometheus-data:/prometheus
-  loki:
+  victorialogs:
     profiles: [monitoring]
-    image: grafana/loki:3.5.3
-    command: ['-config.file=/etc/loki/config.yaml']
+    image: victoriametrics/victoria-logs:v1.53.0
+    command: ['-storageDataPath=/victoria-logs-data', '-retentionPeriod=7d']
+    ports: ['127.0.0.1:9428:9428']
     volumes:
-      - ./observability/loki.yaml:/etc/loki/config.yaml:ro
-      - loki-data:/loki
+      - victorialogs-data:/victoria-logs-data
   tempo:
     profiles: [monitoring]
     image: grafana/tempo:2.8.2
@@ -96,25 +96,27 @@ services:
       - ./observability/config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - alloy-data:/var/lib/alloy/data
-    depends_on: [loki, tempo]
+    depends_on: [victorialogs, tempo]
   grafana:
     profiles: [monitoring]
-    image: grafana/grafana:12.1.1
+    image: grafana/grafana:13.2.3
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-grafana-password-change-me}
       GF_USERS_ALLOW_SIGN_UP: 'false'
       GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_PLUGINS_PREINSTALL_SYNC: victoriametrics-logs-datasource@0.32.0
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: 'false'
     ports: ['127.0.0.1:3000:3000']
     volumes:
       - grafana-data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on: [prometheus, loki, tempo]
+    depends_on: [prometheus, victorialogs, tempo]
 volumes:
   postgres-data:
   prometheus-data:
-  loki-data:
+  victorialogs-data:
   tempo-data:
   alloy-data:
   grafana-data:

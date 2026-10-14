@@ -1,0 +1,103 @@
+apiVersion: 'v1'
+kind: 'PersistentVolumeClaim'
+metadata:
+  name: 'tempo-data'
+  namespace: 'observability'
+spec:
+  accessModes:
+    - 'ReadWriteOnce'
+  storageClassName: 'standard'
+  resources:
+    requests:
+      storage: '2Gi'
+---
+apiVersion: 'apps/v1'
+kind: 'Deployment'
+metadata:
+  name: 'tempo'
+  namespace: 'observability'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: 'tempo'
+  template:
+    metadata:
+      labels:
+        app: 'tempo'
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: 'RuntimeDefault'
+      containers:
+        - name: 'tempo'
+          image: 'grafana/tempo:2.8.2'
+          args:
+            - '-config.file=/etc/tempo/tempo.yaml'
+          ports:
+            - name: 'http'
+              containerPort: 3200
+            - name: 'otlp-grpc'
+              containerPort: 4317
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+            limits:
+              cpu: '1'
+              memory: '768Mi'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - 'ALL'
+          startupProbe:
+            httpGet:
+              path: '/ready'
+              port: 'http'
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: '/ready'
+              port: 'http'
+          livenessProbe:
+            tcpSocket:
+              port: 'http'
+          volumeMounts:
+            - name: 'config'
+              mountPath: '/etc/tempo'
+              readOnly: true
+            - name: 'data'
+              mountPath: '/var/tempo'
+      volumes:
+        - name: 'config'
+          configMap:
+            name: 'tempo-config'
+        - name: 'data'
+          persistentVolumeClaim:
+            claimName: 'tempo-data'
+  strategy:
+    type: 'Recreate'
+---
+apiVersion: 'v1'
+kind: 'Service'
+metadata:
+  name: 'tempo'
+  namespace: 'observability'
+spec:
+  selector:
+    app: 'tempo'
+  ports:
+    - name: 'http'
+      port: 3200
+      targetPort: 'http'
+    - name: 'otlp-grpc'
+      port: 4317
+      targetPort: 'otlp-grpc'

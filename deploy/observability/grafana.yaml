@@ -1,0 +1,139 @@
+apiVersion: 'v1'
+kind: 'Secret'
+metadata:
+  name: 'grafana-admin'
+  namespace: 'observability'
+type: 'Opaque'
+stringData:
+  password: 'minikube-grafana-password'
+---
+apiVersion: 'v1'
+kind: 'PersistentVolumeClaim'
+metadata:
+  name: 'grafana-data'
+  namespace: 'observability'
+spec:
+  accessModes:
+    - 'ReadWriteOnce'
+  storageClassName: 'standard'
+  resources:
+    requests:
+      storage: '1Gi'
+---
+apiVersion: 'apps/v1'
+kind: 'Deployment'
+metadata:
+  name: 'grafana'
+  namespace: 'observability'
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 900
+  selector:
+    matchLabels:
+      app: 'grafana'
+  template:
+    metadata:
+      labels:
+        app: 'grafana'
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        fsGroup: 472
+        seccompProfile:
+          type: 'RuntimeDefault'
+      containers:
+        - name: 'grafana'
+          image: 'grafana/grafana:13.2.3'
+          args: []
+          ports:
+            - name: 'http'
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+            limits:
+              cpu: '500m'
+              memory: '1Gi'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - 'ALL'
+          startupProbe:
+            httpGet:
+              path: '/api/health'
+              port: 'http'
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: '/api/health'
+              port: 'http'
+          livenessProbe:
+            tcpSocket:
+              port: 'http'
+          volumeMounts:
+            - name: 'data'
+              mountPath: '/var/lib/grafana'
+            - name: 'tmp'
+              mountPath: '/tmp'
+            - name: 'datasources'
+              mountPath: '/etc/grafana/provisioning/datasources'
+              readOnly: true
+            - name: 'provider'
+              mountPath: '/etc/grafana/provisioning/dashboards'
+              readOnly: true
+            - name: 'dashboards'
+              mountPath: '/var/lib/grafana/dashboards'
+              readOnly: true
+          env:
+            - name: 'GF_SECURITY_ADMIN_USER'
+              value: 'admin'
+            - name: 'GF_USERS_ALLOW_SIGN_UP'
+              value: 'false'
+            - name: 'GF_ANALYTICS_REPORTING_ENABLED'
+              value: 'false'
+            - name: 'GF_PLUGINS_PREINSTALL_SYNC'
+              value: 'victoriametrics-logs-datasource@0.32.0'
+            - name: GF_PLUGINS_PREINSTALL_AUTO_UPDATE
+              value: 'false'
+            - name: 'GF_SECURITY_ADMIN_PASSWORD'
+              valueFrom:
+                secretKeyRef:
+                  name: 'grafana-admin'
+                  key: 'password'
+      volumes:
+        - name: 'data'
+          persistentVolumeClaim:
+            claimName: 'grafana-data'
+        - name: 'tmp'
+          emptyDir: {}
+        - name: 'datasources'
+          configMap:
+            name: 'grafana-datasources'
+        - name: 'provider'
+          configMap:
+            name: 'grafana-provider'
+        - name: 'dashboards'
+          configMap:
+            name: 'grafana-dashboards'
+  strategy:
+    type: 'Recreate'
+---
+apiVersion: 'v1'
+kind: 'Service'
+metadata:
+  name: 'grafana'
+  namespace: 'observability'
+spec:
+  selector:
+    app: 'grafana'
+  ports:
+    - name: 'http'
+      port: 3000
+      targetPort: 'http'

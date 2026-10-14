@@ -1,0 +1,94 @@
+apiVersion: 'v1'
+kind: 'PersistentVolumeClaim'
+metadata:
+  name: 'victorialogs-data'
+  namespace: 'observability'
+spec:
+  accessModes:
+    - 'ReadWriteOnce'
+  storageClassName: 'standard'
+  resources:
+    requests:
+      storage: '2Gi'
+---
+apiVersion: 'apps/v1'
+kind: 'Deployment'
+metadata:
+  name: 'victorialogs'
+  namespace: 'observability'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: 'victorialogs'
+  template:
+    metadata:
+      labels:
+        app: 'victorialogs'
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: 'RuntimeDefault'
+      containers:
+        - name: 'victorialogs'
+          image: 'victoriametrics/victoria-logs:v1.53.0'
+          args:
+            - '-storageDataPath=/victoria-logs-data'
+            - '-retentionPeriod=7d'
+            - '-memory.allowedPercent=80'
+          ports:
+            - name: 'http'
+              containerPort: 9428
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+            limits:
+              cpu: '1'
+              memory: '512Mi'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - 'ALL'
+          startupProbe:
+            httpGet:
+              path: '/health'
+              port: 'http'
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: '/health'
+              port: 'http'
+          livenessProbe:
+            tcpSocket:
+              port: 'http'
+          volumeMounts:
+            - name: 'data'
+              mountPath: '/victoria-logs-data'
+      volumes:
+        - name: 'data'
+          persistentVolumeClaim:
+            claimName: 'victorialogs-data'
+  strategy:
+    type: 'Recreate'
+---
+apiVersion: 'v1'
+kind: 'Service'
+metadata:
+  name: 'victorialogs'
+  namespace: 'observability'
+spec:
+  selector:
+    app: 'victorialogs'
+  ports:
+    - name: 'http'
+      port: 9428
+      targetPort: 'http'

@@ -10,7 +10,7 @@
 - История изменений, атомарные записи и оптимистическая блокировка по версии.
 - Точные суммы в минимальных единицах токена, без `float`.
 - Учебный интерфейс без авторизации, с примерами для заполнения счетов.
-- JSON-логи zap с корреляцией запросов; опционально Prometheus, Grafana, Loki, Tempo и Alloy.
+- JSON-логи zap с корреляцией запросов; опционально Prometheus, Grafana, VictoriaLogs, Tempo и Alloy.
 
 Подписание переводов, проверка блокчейна, попытки оплаты, статус `paid`
 и escrow пока не реализованы. Они описаны в целевой модели и будут добавлены
@@ -32,8 +32,8 @@ docker compose up --build -d
 вместо `docker compose` во всех командах.
 
 - Приложение: http://localhost:8080 — открывается без входа.
-При обычном запуске работают только PostgreSQL, миграции, API и worker.
-Экспорт трасс отключён; JSON-логи доступны через `docker compose logs`.
+  При обычном запуске работают только PostgreSQL, миграции, API и worker.
+  Экспорт трасс отключён; JSON-логи доступны через `docker compose logs`.
 
 ### Запуск с мониторингом
 
@@ -48,9 +48,11 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitorin
 
 - Grafana: http://localhost:3000 — пользователь `admin`, пароль из `GRAFANA_ADMIN_PASSWORD`.
 - Prometheus: http://localhost:9090.
+- VictoriaLogs vmui: http://localhost:9428/select/vmui/.
+- Дашборд логов: **SRE Payments → Payments · Logs & traces**.
 - Дашборд Grafana: **SRE Payments → Payments · Processes, requests & logs**.
 
-Порты опубликованы только на localhost. PostgreSQL, Loki, Tempo и Alloy
+Порты опубликованы только на localhost. PostgreSQL, VictoriaLogs, Tempo и Alloy
 доступны по внутренней сети Compose. Данные сохраняются в named volumes.
 Пример `.env.example` предназначен только для локальной разработки.
 Если в пароле PostgreSQL есть специальные символы URL, их нужно корректно
@@ -71,7 +73,7 @@ Compose ждёт её успешного завершения перед зап�
 Чтобы вернуться к базовому запуску и остановить мониторинг без удаления данных:
 
 ```sh
-docker compose --profile monitoring stop prometheus grafana loki tempo alloy
+docker compose --profile monitoring stop prometheus grafana victorialogs tempo alloy
 OTEL_EXPORTER_OTLP_ENDPOINT= docker compose up -d
 ```
 
@@ -136,3 +138,175 @@ make lint
 Go форматируется с лимитом строки 110 символов, фронтенд — 100.
 GitHub Actions выполняет lint, проверку форматирования, валидацию Compose
 и сборку образа после push. Тесты и тестовая PostgreSQL из CI удалены. Настроенные правила работы находятся в `AGENTS.md`.
+
+## Запуск в minikube
+
+Манифесты находятся в `deploy/minikube/`. Команды выполнять из корня проекта.
+
+Для запуска всего стенда одной командой нужен уже работающий Docker и установленные
+`minikube`, `kubectl`, `curl`, `python3` и `make`:
+
+```sh
+make minikube-up
+```
+
+Команда запускает профиль `sre-payments`, собирает образ, разворачивает PostgreSQL,
+выполняет миграции, запускает API, worker и инфраструктуру наблюдаемости.
+Существующее количество реплик API и worker сохраняется. Управление Docker и Colima
+в эту команду не входит.
+
+После завершения доступны приложение <http://127.0.0.1:18080>,
+vmui <http://127.0.0.1:9428/select/vmui/> и Grafana <http://127.0.0.1:13000/d/payments-logs>
+(`admin` / `minikube-grafana-password`). Локальные `port-forward` запускаются в фоне
+и восстанавливаются при замене подов. Их PID и логи находятся в `tmp/minikube/`.
+
+```sh
+make minikube-status
+make minikube-ui
+make minikube-ui-stop
+```
+
+`make minikube-ui` открывает только локальные подключения к уже работающему кластеру.
+Последняя команда останавливает только созданные этим запуском локальные подключения;
+поды продолжают работать. После перезагрузки Mac или остановки minikube снова выполните
+`make minikube-up`. Для применения конфигурации к уже работающему приложению используется
+`kubectl --context=sre-payments apply -k deploy/observability`. `make up` запускает Docker Compose.
+
+Ниже приведены ручные шаги для разбора и выполнения задания по Kubernetes.
+
+Запустить Docker и однодовый кластер:
+
+```sh
+colima start --cpu 4 --memory 6
+minikube start -p sre-payments --driver=docker --container-runtime=docker --nodes=1 --cpus=3 --memory=4096 --keep-context
+```
+
+Собрать образ в Docker daemon minikube и явно загрузить его через архив:
+
+```sh
+eval "$(minikube -p sre-payments docker-env --shell bash)"
+docker build --build-arg VERSION=minikube -t sre-payments:minikube .
+image_archive=$(mktemp "${TMPDIR:-/tmp}/sre-payments-image.XXXXXX")
+docker save -o "$image_archive" sre-payments:minikube
+minikube -p sre-payments image load "$image_archive"
+rm "$image_archive"
+eval "$(minikube -p sre-payments docker-env --unset --shell bash)"
+```
+
+Образ уже доступен ноде после сборки; явная загрузка выполняет соответствующий
+пункт задания. Передача архива исключает выбор внешнего daemon Colima.
+Последняя команда возвращает Docker CLI к обычному окружению.
+
+При ошибке DNS `lookup registry-1.docker.io ... server misbehaving` на этом Mac
+можно проверить локальный resolver Colima и применить его только к учебной ноде:
+
+```sh
+docker --context colima exec sre-payments nslookup registry-1.docker.io 192.168.5.2
+# Выполнить следующую команду только после успешного разрешения адреса выше.
+docker --context colima exec sre-payments sh -c '
+  if [ ! -f /etc/resolv.conf.payments-original ]; then
+    cp /etc/resolv.conf /etc/resolv.conf.payments-original
+  fi
+  printf "nameserver 192.168.5.2\noptions ndots:0\n" > /etc/resolv.conf
+'
+```
+
+Адрес `192.168.5.2` проверен в этом окружении; на другом компьютере он может
+отличаться. После исправления DNS повторить сборку.
+
+Применить конфигурацию и дождаться PostgreSQL:
+
+```sh
+kubectl --context=sre-payments apply -f deploy/minikube/namespace.yaml
+kubectl --context=sre-payments apply -f deploy/minikube/config.yaml
+kubectl --context=sre-payments apply -f deploy/minikube/postgres.yaml
+kubectl --context=sre-payments -n sre-payments rollout status statefulset/postgres --timeout=180s
+```
+
+После успешной готовности базы применить миграции и дождаться их завершения:
+
+```sh
+kubectl --context=sre-payments apply -f deploy/minikube/migrate.yaml
+kubectl --context=sre-payments -n sre-payments wait --for=condition=complete job/payments-migrate --timeout=300s
+```
+
+Только после успешного завершения миграций запустить API и worker:
+
+```sh
+kubectl --context=sre-payments apply -f deploy/minikube/api.yaml -f deploy/minikube/worker.yaml
+kubectl --context=sre-payments -n sre-payments rollout status deployment/payments-api --timeout=180s
+kubectl --context=sre-payments -n sre-payments rollout status deployment/payments-worker --timeout=180s
+kubectl --context=sre-payments -n sre-payments get pods -o wide
+```
+
+Для демонстрации масштабирования увеличить API с одной до трёх реплик,
+а worker — с одной до двух:
+
+```sh
+kubectl --context=sre-payments -n sre-payments scale deployment/payments-api --replicas=3
+kubectl --context=sre-payments -n sre-payments scale deployment/payments-worker --replicas=2
+kubectl --context=sre-payments -n sre-payments rollout status deployment/payments-api --timeout=180s
+kubectl --context=sre-payments -n sre-payments rollout status deployment/payments-worker --timeout=180s
+kubectl --context=sre-payments -n sre-payments get deployments,pods -o wide
+```
+
+Открыть локальный туннель и оставить команду работающей:
+
+```sh
+kubectl --context=sre-payments -n sre-payments port-forward --address=127.0.0.1 service/payments-api 18080:8080
+```
+
+Приложение доступно по адресу <http://127.0.0.1:18080>. Все команды Kubernetes
+явно выбирают отдельный локальный контекст `sre-payments`.
+
+## VictoriaLogs и трейсы в minikube
+
+В том же кластере можно развернуть VictoriaLogs single-node, Alloy, Tempo и Grafana.
+Приложение остаётся в `sre-payments`, инфраструктура — в `observability`.
+Alloy читает JSON-логи API, worker и миграций через Kubernetes API и принимает
+OTLP/HTTP spans. VictoriaLogs и Tempo хранят данные семь дней на отдельных PVC.
+
+После запуска приложения по инструкции выше примените Kustomize overlay:
+
+```sh
+kubectl --context=sre-payments apply -k deploy/observability
+```
+
+`observability/kustomization.yaml` создаёт ConfigMap из общих файлов настроек.
+`deploy/minikube/kustomization.yaml` описывает постоянно работающие компоненты приложения.
+`deploy/observability/kustomization.yaml` объединяет приложение и инфраструктуру,
+добавляет генерируемый ConfigMap `payments-telemetry` с адресом Alloy для API и worker.
+Он подключается последним в `envFrom` и задаёт адрес экспорта трейсов поверх базовых настроек.
+В overlay задано три реплики API и две worker; `make minikube-up` сохраняет текущий масштаб.
+
+При изменении генерируемого ConfigMap меняется хэш в его имени и ссылка в шаблоне
+пода. После `kubectl apply -k` Deployment обновляет поды автоматически. Принудительный
+`rollout restart` не требуется. Неизменённые конфигурации повторный apply не перезапускает.
+Предварительный просмотр: `kubectl kustomize deploy/observability`.
+
+После изменений кода используйте `make minikube-up`: он собирает образ, присваивает
+ему тег по содержимому и применяет Kustomize с новым тегом. Миграции выполняются
+отдельным Job после готовности PostgreSQL; этот Job не входит в overlay наблюдаемости.
+Все команды явно используют локальный контекст `sre-payments`.
+
+В отдельных терминалах оставьте работающими туннели:
+
+```sh
+kubectl --context=sre-payments -n observability port-forward --address=127.0.0.1 service/victorialogs 9428:9428
+kubectl --context=sre-payments -n observability port-forward --address=127.0.0.1 service/grafana 13000:3000
+```
+
+- vmui: <http://127.0.0.1:9428/select/vmui/>.
+- Grafana: <http://127.0.0.1:13000>, `admin` / `minikube-grafana-password`
+  (учебный локальный пароль из Secret; меняйте перед публикацией).
+- Grafana → **SRE Payments → Payments · Logs & traces** или **Explore → VictoriaLogs**.
+- Поля `trace_id`, `span_id`, `request_id` доступны для поиска; из `trace_id`
+  можно открыть полный трейс в Tempo и вернуться к логам выбранного span.
+
+Повторные попытки доставки включены. Очереди ограничены и не гарантируют
+сохранение недоставленных данных при длительном сбое или перезапуске Alloy.
+В Kubernetes используется встроенный сбор через API: монтировать каталоги ноды
+или Docker socket для него не требуется. `loki.*` в конфигурации Alloy — названия
+компонентов совместимого протокола доставки; сервер Loki заменён VictoriaLogs.
+
+Подробности и запросы: [наблюдаемость](docs/observability.md), [отчёт ДЗ №3](reports/Отчёт_HW3.md).

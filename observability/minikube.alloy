@@ -1,0 +1,76 @@
+logging {
+  level = "info"
+  format = "json"
+}
+
+discovery.kubernetes "payments" {
+  role = "pod"
+  namespaces {
+    names = ["sre-payments"]
+  }
+  selectors {
+    role = "pod"
+    label = "app in (payments-api,payments-worker,payments-migrate)"
+  }
+}
+
+discovery.relabel "payments" {
+  targets = discovery.kubernetes.payments.targets
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label = "container"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    target_label = "app"
+  }
+}
+
+// Loki-compatible transport is supported by VictoriaLogs; no Loki server is deployed.
+loki.source.kubernetes "payments" {
+  targets = discovery.relabel.payments.output
+  forward_to = [loki.write.victorialogs.receiver]
+}
+
+loki.write "victorialogs" {
+  external_labels = {project = "sre-payments", environment = "minikube"}
+  endpoint {
+    url = "http://victorialogs:9428/insert/loki/api/v1/push?_msg_field=message,msg&_stream_fields=project,environment,namespace,pod,container,app"
+    max_backoff_retries = 10
+  }
+}
+
+otelcol.receiver.otlp "payments" {
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.payments.input]
+  }
+}
+
+otelcol.processor.batch "payments" {
+  timeout = "1s"
+  send_batch_size = 128
+  send_batch_max_size = 256
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

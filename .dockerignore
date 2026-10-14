@@ -7,3 +7,5 @@ coverage
 node_modules
 *.code-workspace
 .DS_Store
+reports
+tmp

@@ -1,25 +1,30 @@
 apiVersion: 1
+deleteDatasources:
+  - name: Loki
+    orgId: 1
 datasources:
-  - name: Prometheus
-    uid: prometheus
-    type: prometheus
+  - name: VictoriaLogs
+    uid: victorialogs
+    type: victoriametrics-logs-datasource
     access: proxy
-    url: http://prometheus:9090
+    url: http://victorialogs:9428
     isDefault: true
     editable: false
-  - name: Loki
-    uid: loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-    editable: false
     jsonData:
+      maxLines: 1000
       derivedFields:
-        - name: TraceID
-          matcherRegex: '"trace_id":"([a-f0-9]{32})"'
+        - name: trace_id
+          matcherType: label
+          matcherRegex: trace_id
           datasourceUid: tempo
           url: '$${__value.raw}'
           urlDisplayLabel: Open trace
+        - name: request_id
+          matcherType: label
+          matcherRegex: request_id
+          datasourceUid: victorialogs
+          url: 'request_id:="$${__value.raw}"'
+          urlDisplayLabel: Request logs
   - name: Tempo
     uid: tempo
     type: tempo
@@ -28,8 +33,8 @@ datasources:
     editable: false
     jsonData:
       tracesToLogsV2:
-        datasourceUid: loki
+        datasourceUid: victorialogs
         spanStartTimeShift: '-1m'
         spanEndTimeShift: '1m'
         customQuery: true
-        query: '{project="sre-payments"} | json | trace_id="$${__trace.traceId}"'
+        query: 'trace_id:="$${__trace.traceId}" AND span_id:="$${__span.spanId}"'
