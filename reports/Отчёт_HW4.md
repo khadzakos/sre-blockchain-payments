@@ -9,11 +9,13 @@ PostgreSQL 17. Доменная модель не зависит от PostgreSQL
 библиотеки метрик. Сервис получает порт `InvoiceMetrics`; адаптер на
 `prometheus/client_golang` подключается в `cmd/payments`.
 
-Для minikube подготовлена установка официального Helm-чарта
+В minikube установлен официальный Helm-чарт
 `victoria-metrics-single` версии `0.49.0`: релиз `vm-single`, namespace `observability`.
 VictoriaMetrics хранит данные на PVC 2 GiB, срок хранения — семь дней.
 Встроенный сборщик выполняет pull каждые десять секунд; отдельный vmagent не нужен.
-Установка в кластер выполняется после согласования с владельцем проекта.
+Релиз имеет статус `deployed`, revision 2. При проверке обнаружены шесть целей:
+три API, два worker и один postgres-exporter. Все цели имеют статус `up`;
+метрика `pg_up{namespace="sre-payments"}` равна 1.
 
 ## Экспортеры
 
@@ -74,6 +76,20 @@ PostgreSQL на порту 5432 и дублирование метрик экс�
 - `deploy/observability/victoriametrics/access.yaml` — Role и RoleBinding для discovery.
 - `internal/telemetry/`, `internal/service/`, `internal/worker/`, `cmd/payments/` —
   реализация и подключение метрик.
+
+В корне архива находятся этот отчёт под именем `Отчёт.md` и запись
+`Скринкаст.mov`. Исходный код приложения, Dockerfile и файлы зависимостей
+также находятся в архиве; frontend встроен в Go-приложение.
+
+Для VictoriaMetrics дополнительно приложены:
+
+- `deploy/observability/victoriametrics/victoria-metrics-single-0.49.0.tgz` —
+  официальный Helm-чарт с зависимостями.
+- `deploy/observability/victoriametrics/installed-manifests.yaml` —
+  манифесты установленного Helm-релиза, полученные через `helm get manifest`.
+
+Файлы Helm не включены в `kustomization.yaml`: установка VictoriaMetrics
+выполняется отдельно от Kustomize командами из README.
 
 ## Источники
 
