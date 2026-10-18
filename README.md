@@ -310,3 +310,46 @@ kubectl --context=sre-payments -n observability port-forward --address=127.0.0.1
 компонентов совместимого протокола доставки; сервер Loki заменён VictoriaLogs.
 
 Подробности и запросы: [наблюдаемость](docs/observability.md), [отчёт ДЗ №3](reports/Отчёт_HW3.md).
+
+## VictoriaMetrics и метрики PostgreSQL
+
+Для задания по метрикам подготовлен отдельный Helm-релиз VictoriaMetrics
+со встроенным сборщиком. API, worker и postgres-exporter обнаруживаются по
+аннотациям подов. Три новых бизнес-счётчика отражают создание, выставление
+и отмену счетов; существующий счётчик отражает истечение срока оплаты.
+
+Команды выполнять из корня проекта. Helm устанавливается отдельно.
+
+Подготовить манифесты для просмотра без изменения кластера:
+
+```sh
+mkdir -p tmp/metrics
+helm template vm-single victoria-metrics-single \
+  --repo https://victoriametrics.github.io/helm-charts/ \
+  --version 0.49.0 \
+  --namespace observability \
+  -f deploy/observability/victoriametrics/values.yaml \
+  > tmp/metrics/victoriametrics-rendered.yaml
+```
+
+Обновить приложение и установить VictoriaMetrics:
+
+```sh
+make minikube-up
+
+kubectl --context=sre-payments apply \
+  -f deploy/minikube/namespace.yaml \
+  -f deploy/observability/namespace.yaml \
+  -f deploy/observability/victoriametrics/access.yaml
+
+helm upgrade --install vm-single victoria-metrics-single \
+  --repo https://victoriametrics.github.io/helm-charts/ \
+  --version 0.49.0 \
+  --kube-context sre-payments \
+  --namespace observability \
+  -f deploy/observability/victoriametrics/values.yaml \
+  --wait --timeout 5m
+```
+
+Конфигурация: `deploy/observability/victoriametrics/values.yaml`, права discovery: `deploy/observability/victoriametrics/access.yaml`.
+[Отчёт по метрикам](reports/Отчёт_HW4.md).

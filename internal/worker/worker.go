@@ -22,7 +22,6 @@ func Run(ctx context.Context, s *service.Invoices, interval time.Duration, metri
 		} else {
 			metrics.WorkerRuns.WithLabelValues("success").Inc()
 			metrics.WorkerSuccess.SetToCurrentTime()
-			metrics.Expired.Add(float64(count))
 		}
 		if count > 0 {
 			telemetry.Logger(check).Info("invoices expired", zap.Int("count", count))

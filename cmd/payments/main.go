@@ -85,8 +85,8 @@ func run() error {
 		log.Info("migrations applied")
 		return nil
 	}
-	s := service.New(repo)
 	metrics := telemetry.NewMetrics()
+	s := service.New(repo, metrics)
 	var h http.Handler
 	processCtx, cancelProcess := context.WithCancel(ctx)
 	defer cancelProcess()

@@ -22,13 +22,18 @@ type Repository interface {
 	Ping(context.Context) error
 }
 
-type Invoices struct {
-	repo Repository
-	now  func() time.Time
+type InvoiceMetrics interface {
+	RecordInvoiceEvent(string)
 }
 
-func New(repo Repository) *Invoices {
-	return &Invoices{repo: repo, now: func() time.Time { return time.Now().UTC() }}
+type Invoices struct {
+	repo    Repository
+	metrics InvoiceMetrics
+	now     func() time.Time
+}
+
+func New(repo Repository, metrics InvoiceMetrics) *Invoices {
+	return &Invoices{repo: repo, metrics: metrics, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Invoices) Ready(ctx context.Context) (err error) {
@@ -74,6 +79,9 @@ func (s *Invoices) Create(ctx context.Context, terms domain.Terms) (out domain.I
 		return i, err
 	}
 	err = s.repo.Create(ctx, i, event(i, "created"))
+	if err == nil {
+		s.metrics.RecordInvoiceEvent("created")
+	}
 	return i, err
 }
 
@@ -115,6 +123,9 @@ func (s *Invoices) Change(
 	}
 	i.Version++
 	err = s.repo.Save(ctx, i, version, event(i, action))
+	if err == nil {
+		s.metrics.RecordInvoiceEvent(action)
+	}
 	return i, err
 }
 

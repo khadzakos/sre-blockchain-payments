@@ -16,7 +16,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318 docker compose --profile monitorin
 в логах генерируются, но полные spans не сохраняются.
 
 В minikube приложение и PostgreSQL находятся в `sre-payments`; VictoriaLogs single-node,
-Tempo, Alloy и Grafana — в `observability` того же кластера. Prometheus остаётся в Compose.
+Tempo, Alloy и Grafana — в `observability` того же кластера. Prometheus остаётся в Compose. Для задания по метрикам отдельно подготовлен
+Helm-релиз VictoriaMetrics в `observability`; прямые команды Helm приведены
+в [README](../README.md#victoriametrics-и-метрики-postgresql).
 Для запуска всего стенда с уже работающим Docker выполните `make minikube-up`.
 Команда запускает minikube, собирает образ, разворачивает приложение и инфраструктуру,
 открывает локальный доступ к приложению, vmui и Grafana в фоне. Подключения
@@ -43,6 +45,8 @@ Overlay объединяет приложение из `deploy/minikube/` с р�
 - OpenTelemetry → OTLP/HTTP Alloy `:4318` → OTLP/gRPC Tempo `:4317`.
 - VictoriaLogs и Tempo → отдельные источники Grafana, связанные идентификатором трейса.
 - `/metrics` API и worker → Prometheus в Compose → Grafana.
+- В minikube после установки Helm-релиза: `/metrics` API/worker и postgres-exporter
+  → встроенный сборщик VictoriaMetrics (discovery подов) → VictoriaMetrics TSDB.
 
 Alloy использует Loki-совместимый endpoint VictoriaLogs `/insert/loki/api/v1/push`.
 Компоненты `loki.source.*` и `loki.write` описывают протокол доставки; отдельного

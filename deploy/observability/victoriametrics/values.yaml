@@ -1,0 +1,59 @@
+rbac:
+  create: false
+serviceAccount:
+  create: true
+  name: vm-single-scraper
+server:
+  fullnameOverride: vm-single-victoria-metrics-single-server
+  retentionPeriod: 7d
+  persistentVolume:
+    enabled: true
+    storageClassName: standard
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+  scrape:
+    enabled: true
+    config:
+      global:
+        scrape_interval: 10s
+        scrape_timeout: 5s
+      scrape_configs:
+        - job_name: payments-pods
+          kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: [sre-payments]
+          relabel_configs:
+            - action: keep
+              source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              regex: 'true'
+            - action: keep
+              source_labels: [__meta_kubernetes_pod_phase]
+              regex: Running
+            - action: drop
+              source_labels: [__meta_kubernetes_pod_container_init]
+              regex: 'true'
+            # Avoid scraping PostgreSQL twice: select only the annotated container port.
+            - action: keep_if_equal
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_port
+                - __meta_kubernetes_pod_container_port_number
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              regex: '(.+)'
+              target_label: __metrics_path__
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              target_label: pod
+            - source_labels: [__meta_kubernetes_pod_label_app]
+              target_label: app
+            - source_labels: [__meta_kubernetes_pod_container_name]
+              target_label: container

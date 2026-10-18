@@ -122,6 +122,9 @@ type Metrics struct {
 	Duration      *prometheus.HistogramVec
 	WorkerRuns    *prometheus.CounterVec
 	WorkerSuccess prometheus.Gauge
+	Created       prometheus.Counter
+	Issued        prometheus.Counter
+	Cancelled     prometheus.Counter
 	Expired       prometheus.Counter
 }
 
@@ -150,6 +153,15 @@ func NewMetrics() *Metrics {
 				Help: "Last successful expiration pass.",
 			},
 		),
+		Created: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "payments_invoices_created_total", Help: "Successfully persisted new invoices.",
+		}),
+		Issued: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "payments_invoices_issued_total", Help: "Successfully issued invoices.",
+		}),
+		Cancelled: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "payments_invoices_cancelled_total", Help: "Successfully cancelled invoices.",
+		}),
 		Expired: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "payments_invoices_expired_total",
@@ -164,11 +176,28 @@ func NewMetrics() *Metrics {
 		m.Duration,
 		m.WorkerRuns,
 		m.WorkerSuccess,
+		m.Created,
+		m.Issued,
+		m.Cancelled,
 		m.Expired,
 	)
 	return m
 }
 
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{})
+	return promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{EnableOpenMetrics: true})
+}
+
+// RecordInvoiceEvent is called only after the repository commits a successful mutation.
+func (m *Metrics) RecordInvoiceEvent(kind string) {
+	switch kind {
+	case "created":
+		m.Created.Inc()
+	case "issued":
+		m.Issued.Inc()
+	case "cancelled":
+		m.Cancelled.Inc()
+	case "expired":
+		m.Expired.Inc()
+	}
 }
